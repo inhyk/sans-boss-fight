@@ -884,6 +884,20 @@ const PATTERNS = [
     extra2Active: 0.16,
     extra2Orientation: "horizontal",
   }),
+  makePattern("edgeBlasters", 8.8, "blue", "* 영상의 압박처럼 좌우 블래스터와 천장을 같이 읽어라.", {
+    startDelay: 0.34,
+    interval: 0.52,
+    edgeInset: 18,
+    sideThickness: 36,
+    topThickness: 28,
+    sideDamage: 10,
+    topDamage: 9,
+    sideCharge: 0.34,
+    topCharge: 0.28,
+    sideActive: 0.18,
+    topActive: 0.16,
+    sequence: ["right", "left", "right", "left", "top", "right", "left", "top", "right", "left"],
+  }),
 ];
 
 function resetPlayer(mode = "red") {
@@ -2055,6 +2069,57 @@ function updateEnemyPattern(dt) {
           }
 
           enemy.nextSpawn += pattern.interval ?? 1;
+          enemy.step += 1;
+        }
+        break;
+      }
+      case "edgeBlasters": {
+        if (enemy.t >= enemy.nextSpawn) {
+          const sequence = pattern.sequence ?? ["right", "left", "top", "right", "left", "top"];
+          const action = sequence[enemy.step % sequence.length];
+          const edgeInset = pattern.edgeInset ?? 18;
+          const sideThickness = pattern.sideThickness ?? 34;
+          const topThickness = pattern.topThickness ?? 26;
+
+          if (action === "left") {
+            spawnBeam(
+              "vertical",
+              ARENA.x + edgeInset + sideThickness / 2,
+              sideThickness,
+              pattern.sideDamage ?? 9,
+              pattern.sideCharge ?? 0.34,
+              pattern.sideActive ?? 0.18,
+            );
+          } else if (action === "right") {
+            spawnBeam(
+              "vertical",
+              ARENA.x + ARENA.w - edgeInset - sideThickness / 2,
+              sideThickness,
+              pattern.sideDamage ?? 9,
+              pattern.sideCharge ?? 0.34,
+              pattern.sideActive ?? 0.18,
+            );
+          } else if (action === "top") {
+            spawnBeam(
+              "horizontal",
+              ARENA.y + edgeInset + topThickness / 2,
+              topThickness,
+              pattern.topDamage ?? pattern.sideDamage ?? 9,
+              pattern.topCharge ?? 0.28,
+              pattern.topActive ?? 0.16,
+            );
+          } else if (action === "bottom") {
+            spawnBeam(
+              "horizontal",
+              ARENA.y + ARENA.h - edgeInset - topThickness / 2,
+              topThickness,
+              pattern.topDamage ?? pattern.sideDamage ?? 9,
+              pattern.topCharge ?? 0.28,
+              pattern.topActive ?? 0.16,
+            );
+          }
+
+          enemy.nextSpawn += pattern.interval ?? 0.58;
           enemy.step += 1;
         }
         break;
