@@ -13,12 +13,27 @@
         <h1>Sans Boss Fight</h1>
         <p class="summary">
           방향키와 <span>WASD</span>로 움직이고, <span>Z</span> 또는 <span>Enter</span>로 선택합니다.
-          파란 영혼 상태에서는 점프로 뼈를 넘을 수 있습니다.
+          파란 영혼 상태에서는 점프로 뼈를 넘을 수 있습니다. 모바일에서는 화면 아래 터치 버튼으로 조작합니다.
         </p>
       </section>
 
       <section class="shell">
         <canvas id="game" width="960" height="540" aria-label="Sans boss fight game"></canvas>
+        <div class="touch-ui" aria-label="모바일 조작 버튼">
+          <div class="touch-pad">
+            <button class="touch-btn touch-btn--ghost" type="button" data-virtual-key="arrowup" data-virtual-mode="hold" aria-label="위로 이동 또는 점프">▲</button>
+            <div class="touch-pad__row">
+              <button class="touch-btn touch-btn--ghost" type="button" data-virtual-key="arrowleft" data-virtual-mode="hold" aria-label="왼쪽으로 이동">◀</button>
+              <button class="touch-btn touch-btn--ghost" type="button" data-virtual-key="arrowdown" data-virtual-mode="hold" aria-label="아래로 이동">▼</button>
+              <button class="touch-btn touch-btn--ghost" type="button" data-virtual-key="arrowright" data-virtual-mode="hold" aria-label="오른쪽으로 이동">▶</button>
+            </div>
+          </div>
+          <div class="touch-actions">
+            <button class="touch-btn touch-btn--primary" type="button" data-virtual-key="z" data-virtual-mode="tap" aria-label="확인 또는 공격">ACT</button>
+            <button class="touch-btn" type="button" data-virtual-key="arrowup" data-virtual-mode="hold" aria-label="점프">JUMP</button>
+            <button class="touch-btn touch-btn--small" type="button" data-virtual-key="m" data-virtual-mode="tap" aria-label="음소거">MUTE</button>
+          </div>
+        </div>
       </section>
 
       <section class="notes">
@@ -27,6 +42,7 @@
           <p>이동: 방향키 / WASD</p>
           <p>확인: Z / Enter</p>
           <p>점프: 위 / W</p>
+          <p>모바일: 화면 하단 터치 버튼</p>
           <p>음소거: M</p>
           <p>명령어: /</p>
         </div>

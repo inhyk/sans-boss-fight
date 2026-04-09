@@ -4,6 +4,7 @@ const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 const soundtrack = createDarkSoundtrack();
+const virtualButtons = Array.from(document.querySelectorAll("[data-virtual-key]"));
 
 const WIDTH = 960;
 const HEIGHT = 540;
@@ -69,7 +70,7 @@ const INTRO_LINES = [
 ];
 
 const PREVENT_KEYS = new Set([" ", "arrowdown", "arrowleft", "arrowright", "arrowup", "enter"]);
-const COMMAND_HINT = "help | phase 12 | hp 40 | maxhp 120 | music on";
+const COMMAND_HINT = "timer auto on | phase next | god on | soul blue";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -109,6 +110,14 @@ function makePattern(key, duration, soulMode, hint, options = {}) {
   return { key, duration, soulMode, hint, ...options };
 }
 
+function formatStopwatchTime(seconds) {
+  const safeSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const wholeSeconds = Math.floor(safeSeconds % 60);
+  const centiseconds = Math.floor((safeSeconds - Math.floor(safeSeconds)) * 100);
+  return `${String(minutes).padStart(2, "0")}:${String(wholeSeconds).padStart(2, "0")}.${String(centiseconds).padStart(2, "0")}`;
+}
+
 function createPlayer() {
   return {
     x: ARENA.x + ARENA.w / 2,
@@ -128,6 +137,66 @@ const inputState = {
   held: new Set(),
   pressed: new Set(),
 };
+const activeVirtualPointers = new Map();
+const virtualHoldCounts = new Map();
+
+function triggerVirtualKey(rawKey, hold = false) {
+  const key = normalizeKey(rawKey);
+
+  if (game.command.open) {
+    if (key === "m") {
+      soundtrack.toggleMute();
+    }
+    return;
+  }
+
+  if (hold) {
+    const holdCount = virtualHoldCounts.get(key) || 0;
+    virtualHoldCounts.set(key, holdCount + 1);
+    if (holdCount > 0) {
+      return;
+    }
+  }
+
+  if (key === "m") {
+    soundtrack.toggleMute();
+    return;
+  }
+
+  const firstPress = !inputState.held.has(key);
+  soundtrack.arm();
+  if (firstPress) {
+    inputState.pressed.add(key);
+  }
+
+  if (hold) {
+    inputState.held.add(key);
+  }
+}
+
+function releaseVirtualKey(rawKey) {
+  const key = normalizeKey(rawKey);
+  const holdCount = virtualHoldCounts.get(key) || 0;
+
+  if (holdCount <= 1) {
+    virtualHoldCounts.delete(key);
+    inputState.held.delete(key);
+    return;
+  }
+
+  virtualHoldCounts.set(key, holdCount - 1);
+}
+
+function clearActiveVirtualPointers() {
+  for (const { key, button, hold } of activeVirtualPointers.values()) {
+    if (hold) {
+      releaseVirtualKey(key);
+    }
+    button.classList.remove("is-active");
+  }
+  activeVirtualPointers.clear();
+  virtualHoldCounts.clear();
+}
 
 window.addEventListener("keydown", (event) => {
   const key = normalizeKey(event.key);
@@ -178,6 +247,51 @@ window.addEventListener("keyup", (event) => {
   inputState.held.delete(normalizeKey(event.key));
 });
 
+window.addEventListener("blur", () => {
+  inputState.held.clear();
+  inputState.pressed.clear();
+  clearActiveVirtualPointers();
+});
+
+for (const button of virtualButtons) {
+  const key = button.dataset.virtualKey;
+  const hold = (button.dataset.virtualMode || "hold") === "hold";
+
+  button.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
+
+  button.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    button.setPointerCapture(event.pointerId);
+    button.classList.add("is-active");
+    activeVirtualPointers.set(event.pointerId, { button, hold, key });
+    triggerVirtualKey(key, hold);
+
+    if (!hold) {
+      button.classList.remove("is-active");
+      activeVirtualPointers.delete(event.pointerId);
+    }
+  });
+
+  const releasePointer = (event) => {
+    const active = activeVirtualPointers.get(event.pointerId);
+    if (!active) {
+      return;
+    }
+
+    if (active.hold) {
+      releaseVirtualKey(active.key);
+    }
+
+    active.button.classList.remove("is-active");
+    activeVirtualPointers.delete(event.pointerId);
+  };
+
+  button.addEventListener("pointerup", releasePointer);
+  button.addEventListener("pointercancel", releasePointer);
+}
+
 function keyDown(...keys) {
   return keys.some((key) => inputState.held.has(key));
 }
@@ -210,6 +324,13 @@ const game = {
     buffer: "",
     message: "",
     timer: 0,
+  },
+  stopwatch: {
+    elapsed: 0,
+    running: false,
+    visible: true,
+    auto: false,
+    lastStopped: 0,
   },
   stars: Array.from({ length: 56 }, () => ({
     x: Math.random() * WIDTH,
@@ -757,6 +878,9 @@ function resetGame() {
   game.command.buffer = "";
   game.command.message = "";
   game.command.timer = 0;
+  game.stopwatch.elapsed = 0;
+  game.stopwatch.running = false;
+  game.stopwatch.lastStopped = 0;
 }
 
 function queueText(lines, onComplete) {
@@ -771,6 +895,24 @@ function queueText(lines, onComplete) {
 function setCommandMessage(message, duration = 3.4) {
   game.command.message = message;
   game.command.timer = duration;
+}
+
+function startStopwatch(reset = false) {
+  if (reset) {
+    game.stopwatch.elapsed = 0;
+  }
+  game.stopwatch.running = true;
+}
+
+function stopStopwatch() {
+  game.stopwatch.running = false;
+  game.stopwatch.lastStopped = game.stopwatch.elapsed;
+}
+
+function resetStopwatch() {
+  game.stopwatch.elapsed = 0;
+  game.stopwatch.lastStopped = 0;
+  game.stopwatch.running = false;
 }
 
 function openCommandConsole() {
@@ -807,6 +949,29 @@ function jumpToPhase(phaseIndex) {
   openMenu();
 }
 
+function applyDamage(amount) {
+  const damage = clamp(Math.round(amount), 0, 999);
+
+  if (damage <= 0) {
+    setCommandMessage("0 데미지는 적용되지 않았다.");
+    return;
+  }
+
+  game.player.hp = Math.max(0, game.player.hp - damage);
+  game.shake = 8;
+
+  if (game.player.hp <= 0) {
+    game.state = "lose";
+    game.hazards = [];
+    game.enemy = null;
+    if (game.stopwatch.auto) {
+      stopStopwatch();
+    }
+  }
+
+  setCommandMessage(`${damage} 데미지를 적용했다. HP ${game.player.hp}/${game.player.maxHp}`);
+}
+
 function executeCommand(rawInput) {
   const input = rawInput.trim();
 
@@ -819,7 +984,7 @@ function executeCommand(rawInput) {
   const command = name.toLowerCase();
 
   if (["help", "도움말", "?"].includes(command)) {
-    setCommandMessage("명령어: help, start, phase, battle, hp, maxhp, heal, music, restart", 5.2);
+    setCommandMessage("명령어: phase next, menu, damage 8, soul blue, god on, timer auto on", 6);
     closeCommandConsole();
     return;
   }
@@ -836,9 +1001,25 @@ function executeCommand(rawInput) {
   }
 
   if (["phase", "페이즈"].includes(command)) {
-    const phase = Number(args[0]);
+    const target = (args[0] || "").toLowerCase();
+
+    if (["next", "다음"].includes(target)) {
+      jumpToPhase(game.roundIndex + 1);
+      setCommandMessage(`PHASE ${game.roundIndex + 1} 준비 완료`);
+      closeCommandConsole();
+      return;
+    }
+
+    if (["prev", "previous", "이전"].includes(target)) {
+      jumpToPhase(game.roundIndex - 1);
+      setCommandMessage(`PHASE ${game.roundIndex + 1} 준비 완료`);
+      closeCommandConsole();
+      return;
+    }
+
+    const phase = Number(target);
     if (!Number.isFinite(phase)) {
-      setCommandMessage("사용법: phase 12", 3.6);
+      setCommandMessage("사용법: phase 12 | phase next | phase prev", 4.2);
       return;
     }
 
@@ -849,6 +1030,10 @@ function executeCommand(rawInput) {
   }
 
   if (["battle", "fight", "전투"].includes(command)) {
+    if (game.stopwatch.auto) {
+      startStopwatch(true);
+    }
+
     if (game.state === "title") {
       queueText(INTRO_LINES, () => startEnemyTurn());
     } else {
@@ -858,6 +1043,17 @@ function executeCommand(rawInput) {
       startEnemyTurn();
     }
     setCommandMessage(`PHASE ${game.roundIndex + 1} 전투 시작`);
+    closeCommandConsole();
+    return;
+  }
+
+  if (["menu", "메뉴"].includes(command)) {
+    game.hazards = [];
+    game.enemy = null;
+    game.text = null;
+    game.attackMeter = null;
+    openMenu();
+    setCommandMessage("메뉴로 돌아갔다.");
     closeCommandConsole();
     return;
   }
@@ -879,6 +1075,18 @@ function executeCommand(rawInput) {
     }
 
     setCommandMessage(`HP를 ${game.player.hp}로 설정했다.`);
+    closeCommandConsole();
+    return;
+  }
+
+  if (["damage", "hurt", "데미지"].includes(command)) {
+    const amount = Number(args[0]);
+    if (!Number.isFinite(amount)) {
+      setCommandMessage("사용법: damage 8", 3.6);
+      return;
+    }
+
+    applyDamage(amount);
     closeCommandConsole();
     return;
   }
@@ -916,6 +1124,64 @@ function executeCommand(rawInput) {
     return;
   }
 
+  if (["item", "아이템"].includes(command)) {
+    const mode = (args[0] || "status").toLowerCase();
+
+    if (["reset", "restore", "복구"].includes(mode)) {
+      game.itemUsed = false;
+      setCommandMessage("파이를 다시 사용할 수 있게 했다.");
+      closeCommandConsole();
+      return;
+    }
+
+    if (["use", "사용"].includes(mode)) {
+      game.itemUsed = true;
+      setCommandMessage("아이템을 사용한 상태로 설정했다.");
+      closeCommandConsole();
+      return;
+    }
+
+    setCommandMessage(game.itemUsed ? "아이템은 이미 사용됨" : "아이템 사용 가능");
+    closeCommandConsole();
+    return;
+  }
+
+  if (["soul", "영혼"].includes(command)) {
+    const mode = (args[0] || "").toLowerCase();
+    if (!["red", "blue", "빨강", "파랑"].includes(mode)) {
+      setCommandMessage("사용법: soul red | soul blue", 4.2);
+      return;
+    }
+
+    resetPlayer(["blue", "파랑"].includes(mode) ? "blue" : "red");
+    setCommandMessage(`영혼 모드를 ${game.player.soulMode.toUpperCase()}로 변경했다.`);
+    closeCommandConsole();
+    return;
+  }
+
+  if (["god", "무적"].includes(command)) {
+    const mode = (args[0] || "toggle").toLowerCase();
+
+    if (["on", "켜", "켬"].includes(mode)) {
+      game.player.invuln = 99999;
+      setCommandMessage("무적 모드를 켰다.");
+      closeCommandConsole();
+      return;
+    }
+
+    if (["off", "꺼", "끔"].includes(mode)) {
+      game.player.invuln = 0;
+      setCommandMessage("무적 모드를 껐다.");
+      closeCommandConsole();
+      return;
+    }
+
+    game.player.invuln = game.player.invuln > 10 ? 0 : 99999;
+    setCommandMessage(game.player.invuln > 10 ? "무적 모드를 켰다." : "무적 모드를 껐다.");
+    closeCommandConsole();
+    return;
+  }
+
   if (["music", "음악"].includes(command)) {
     const mode = (args[0] || "toggle").toLowerCase();
 
@@ -943,6 +1209,67 @@ function executeCommand(rawInput) {
       soundtrack.arm();
     }
     setCommandMessage(muted ? "배경음을 껐다." : "배경음을 켰다.");
+    closeCommandConsole();
+    return;
+  }
+
+  if (["timer", "time", "stopwatch", "스톱워치", "타이머"].includes(command)) {
+    const mode = (args[0] || "status").toLowerCase();
+
+    if (["start", "run", "시작"].includes(mode)) {
+      startStopwatch(false);
+      setCommandMessage(`스톱워치 시작 ${formatStopwatchTime(game.stopwatch.elapsed)}`);
+      closeCommandConsole();
+      return;
+    }
+
+    if (["pause", "stop", "정지", "멈춤"].includes(mode)) {
+      stopStopwatch();
+      setCommandMessage(`스톱워치 정지 ${formatStopwatchTime(game.stopwatch.lastStopped)}`);
+      closeCommandConsole();
+      return;
+    }
+
+    if (["reset", "clear", "초기화"].includes(mode)) {
+      resetStopwatch();
+      setCommandMessage("스톱워치를 초기화했다.");
+      closeCommandConsole();
+      return;
+    }
+
+    if (["show", "표시"].includes(mode)) {
+      game.stopwatch.visible = true;
+      setCommandMessage("스톱워치를 표시한다.");
+      closeCommandConsole();
+      return;
+    }
+
+    if (["hide", "숨김"].includes(mode)) {
+      game.stopwatch.visible = false;
+      setCommandMessage("스톱워치를 숨긴다.");
+      closeCommandConsole();
+      return;
+    }
+
+    if (["auto"].includes(mode)) {
+      const autoMode = (args[1] || "toggle").toLowerCase();
+      if (["on", "켜", "켬"].includes(autoMode)) {
+        game.stopwatch.auto = true;
+      } else if (["off", "꺼", "끔"].includes(autoMode)) {
+        game.stopwatch.auto = false;
+      } else {
+        game.stopwatch.auto = !game.stopwatch.auto;
+      }
+
+      setCommandMessage(game.stopwatch.auto ? "자동 스톱워치를 켰다." : "자동 스톱워치를 껐다.");
+      closeCommandConsole();
+      return;
+    }
+
+    setCommandMessage(
+      `스톱워치 ${game.stopwatch.running ? "RUN" : "STOP"} ${formatStopwatchTime(game.stopwatch.elapsed)}${game.stopwatch.auto ? " AUTO" : ""}`,
+      4.4,
+    );
     closeCommandConsole();
     return;
   }
@@ -1016,6 +1343,9 @@ function startAttackMeter() {
 
 function startEnemyTurn() {
   const pattern = PATTERNS[game.roundIndex];
+  if (game.stopwatch.auto && !game.stopwatch.running) {
+    startStopwatch(game.roundIndex === 0 || game.stopwatch.elapsed === 0);
+  }
   resetPlayer(pattern.soulMode);
   game.state = "enemy";
   game.hazards = [];
@@ -1066,6 +1396,9 @@ function hurtPlayer(damage) {
     game.state = "lose";
     game.hazards = [];
     game.enemy = null;
+    if (game.stopwatch.auto) {
+      stopStopwatch();
+    }
   }
 }
 
@@ -1761,6 +2094,9 @@ function updateAttackMeter(dt) {
   }
 
   queueText(["* 일격이 그대로 꽂혔다.", "* 샌즈의 웃음이 멎는다."], () => {
+    if (game.stopwatch.auto) {
+      stopStopwatch();
+    }
     game.state = "win";
   });
 }
@@ -1789,6 +2125,9 @@ function update(dt) {
   game.eyeFlash = Math.max(0, game.eyeFlash - dt * 1.8);
   game.shake = Math.max(0, game.shake - dt * 26);
   game.command.timer = Math.max(0, game.command.timer - dt);
+  if (game.stopwatch.running) {
+    game.stopwatch.elapsed += dt;
+  }
 
   if (game.command.open) {
     soundtrack.setStage(game.state, game.roundIndex, PATTERNS.length);
@@ -2098,6 +2437,7 @@ function drawPlayerInfo() {
   const hudY = 88;
   const hudW = 154;
   const hudH = 52;
+  const timerY = hudY + hudH + 10;
 
   ctx.fillStyle = COLORS.text;
   ctx.font = '700 20px "SF Mono", "Menlo", monospace';
@@ -2129,6 +2469,24 @@ function drawPlayerInfo() {
   ctx.fillStyle = COLORS.muted;
   ctx.font = '700 14px "SF Mono", "Menlo", monospace';
   ctx.fillText(`/ ${game.player.maxHp}`, hudX + 58, hudY + 42);
+
+  if (!game.stopwatch.visible) {
+    return;
+  }
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+  ctx.fillRect(hudX, timerY, hudW, hudH);
+  ctx.strokeStyle = game.stopwatch.running ? "rgba(85, 213, 255, 0.34)" : "rgba(255, 255, 255, 0.18)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(hudX, timerY, hudW, hudH);
+
+  ctx.fillStyle = game.stopwatch.running ? COLORS.blue : COLORS.muted;
+  ctx.font = '700 13px "SF Mono", "Menlo", monospace';
+  ctx.fillText(game.stopwatch.auto ? "STOPWATCH AUTO" : "STOPWATCH", hudX + 12, timerY + 17);
+
+  ctx.fillStyle = COLORS.text;
+  ctx.font = '700 24px "SF Mono", "Menlo", monospace';
+  ctx.fillText(formatStopwatchTime(game.stopwatch.elapsed), hudX + 12, timerY + 42);
 }
 
 function drawOverlay() {
