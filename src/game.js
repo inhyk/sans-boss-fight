@@ -70,7 +70,7 @@ const INTRO_LINES = [
 ];
 
 const PREVENT_KEYS = new Set([" ", "arrowdown", "arrowleft", "arrowright", "arrowup", "enter"]);
-const COMMAND_HINT = "timer auto on | phase next | god on | soul blue";
+const COMMAND_HINT = "status | skip | phase random | timer add 15";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -815,7 +815,7 @@ const PATTERNS = [
     pulseOrder: ["blue", "orange", "white"],
     pulseOffset: 2,
   }),
-  makePattern("finale", 10.0, "red", "* 20단계의 끝이다. 끝까지 버텨라.", {
+  makePattern("finale", 10.0, "red", "* 20단계의 고비다. 아직 끝나지 않았다.", {
     startDelay: 0.36,
     extraStart: 0.68,
     pulseStart: 0.94,
@@ -849,6 +849,40 @@ const PATTERNS = [
     pulseDamage: 7,
     pulseOrder: ["blue", "orange", "white"],
     pulseOffset: 2,
+  }),
+  makePattern("blasters", 10.8, "red", "* 블래스터 지옥이다. 숨 돌릴 틈 없이 읽어라.", {
+    startDelay: 0.3,
+    interval: 0.52,
+    xMargin: 48,
+    yMargin: 34,
+    verticalStride: 61,
+    horizontalStride: 37,
+    vThickness: 40,
+    hThickness: 36,
+    vDamage: 11,
+    hDamage: 10,
+    vCharge: 0.34,
+    hCharge: 0.32,
+    vActive: 0.19,
+    hActive: 0.18,
+    extraModulo: 1,
+    extraCount: 1,
+    extraShift: 0,
+    extraSpacing: 76,
+    extraThickness: 32,
+    extraDamage: 9,
+    extraCharge: 0.28,
+    extraActive: 0.17,
+    extraOrientation: "vertical",
+    extra2Modulo: 1,
+    extra2Count: 1,
+    extra2Shift: 0,
+    extra2Spacing: 58,
+    extra2Thickness: 30,
+    extra2Damage: 9,
+    extra2Charge: 0.3,
+    extra2Active: 0.16,
+    extra2Orientation: "horizontal",
   }),
 ];
 
@@ -913,6 +947,57 @@ function resetStopwatch() {
   game.stopwatch.elapsed = 0;
   game.stopwatch.lastStopped = 0;
   game.stopwatch.running = false;
+}
+
+function clearBattleState() {
+  game.hazards = [];
+  game.enemy = null;
+  game.text = null;
+  game.attackMeter = null;
+}
+
+function finishCurrentText() {
+  if (!game.text) {
+    return false;
+  }
+
+  const onComplete = game.text.onComplete;
+  game.text = null;
+  if (onComplete) {
+    onComplete();
+  }
+  return true;
+}
+
+function reviveToMenu() {
+  const safePhaseIndex = clamp(game.roundIndex, 0, PATTERNS.length - 1);
+  game.roundIndex = safePhaseIndex;
+  clearBattleState();
+  game.player.hp = game.player.maxHp;
+  game.player.invuln = 0;
+  game.shake = 0;
+  resetPlayer(PATTERNS[safePhaseIndex].soulMode);
+  openMenu();
+}
+
+function formatStatusMessage() {
+  const stateLabel =
+    {
+      title: "TITLE",
+      menu: "MENU",
+      text: "TEXT",
+      attack: "ATTACK",
+      enemy: "ENEMY",
+      win: "WIN",
+      lose: "LOSE",
+    }[game.state] ?? game.state.toUpperCase();
+  const phaseLabel =
+    game.roundIndex >= PATTERNS.length ? "FINAL" : `P${game.roundIndex + 1}/${PATTERNS.length}`;
+  const soulLabel = game.player.soulMode === "blue" ? "BLUE" : "RED";
+  const itemLabel = game.itemUsed ? "USED" : "READY";
+  const godLabel = game.player.invuln > 10 ? "ON" : "OFF";
+  const timerLabel = `${formatStopwatchTime(game.stopwatch.elapsed)}${game.stopwatch.auto ? "A" : ""}`;
+  return `상태 ${stateLabel} | ${phaseLabel} | HP ${game.player.hp}/${game.player.maxHp} | ${soulLabel} | ITEM ${itemLabel} | GOD ${godLabel} | T ${timerLabel}`;
 }
 
 function openCommandConsole() {
@@ -984,7 +1069,26 @@ function executeCommand(rawInput) {
   const command = name.toLowerCase();
 
   if (["help", "도움말", "?"].includes(command)) {
-    setCommandMessage("명령어: phase next, menu, damage 8, soul blue, god on, timer auto on", 6);
+    const topic = (args[0] || "").toLowerCase();
+
+    if (["1", "basic", "기본"].includes(topic)) {
+      setCommandMessage("기본: start, battle, menu, status, skip, phase next|random", 6.6);
+    } else if (["2", "combat", "전투"].includes(topic)) {
+      setCommandMessage("전투: hp 40, heal 20, maxhp 120, damage 8, revive, win", 6.6);
+    } else if (["3", "timer", "타이머"].includes(topic)) {
+      setCommandMessage("타이머: timer start|stop|reset|set 90|add 15|auto on", 6.8);
+    } else if (["4", "tune", "튜닝"].includes(topic)) {
+      setCommandMessage("튜닝: speed red 240, speed blue 200, jump 480, gravity 1400", 6.8);
+    } else {
+      setCommandMessage("help 1 기본 | help 2 전투 | help 3 타이머 | help 4 튜닝", 6.4);
+    }
+
+    closeCommandConsole();
+    return;
+  }
+
+  if (["status", "state", "상태"].includes(command)) {
+    setCommandMessage(formatStatusMessage(), 6.4);
     closeCommandConsole();
     return;
   }
@@ -1003,6 +1107,17 @@ function executeCommand(rawInput) {
   if (["phase", "페이즈"].includes(command)) {
     const target = (args[0] || "").toLowerCase();
 
+    if (!target) {
+      setCommandMessage(
+        game.roundIndex >= PATTERNS.length
+          ? `현재 FINAL (${PATTERNS.length}/${PATTERNS.length})`
+          : `현재 PHASE ${game.roundIndex + 1}/${PATTERNS.length}`,
+        4.6,
+      );
+      closeCommandConsole();
+      return;
+    }
+
     if (["next", "다음"].includes(target)) {
       jumpToPhase(game.roundIndex + 1);
       setCommandMessage(`PHASE ${game.roundIndex + 1} 준비 완료`);
@@ -1017,9 +1132,30 @@ function executeCommand(rawInput) {
       return;
     }
 
+    if (["first", "start", "처음"].includes(target)) {
+      jumpToPhase(0);
+      setCommandMessage("PHASE 1 준비 완료");
+      closeCommandConsole();
+      return;
+    }
+
+    if (["last", "final", "마지막"].includes(target)) {
+      jumpToPhase(PATTERNS.length - 1);
+      setCommandMessage(`PHASE ${game.roundIndex + 1} 준비 완료`);
+      closeCommandConsole();
+      return;
+    }
+
+    if (["random", "rand", "랜덤"].includes(target)) {
+      jumpToPhase(Math.floor(Math.random() * PATTERNS.length));
+      setCommandMessage(`랜덤 PHASE ${game.roundIndex + 1} 준비 완료`);
+      closeCommandConsole();
+      return;
+    }
+
     const phase = Number(target);
     if (!Number.isFinite(phase)) {
-      setCommandMessage("사용법: phase 12 | phase next | phase prev", 4.2);
+      setCommandMessage("사용법: phase 12 | next | prev | first | last | random", 5);
       return;
     }
 
@@ -1048,17 +1184,81 @@ function executeCommand(rawInput) {
   }
 
   if (["menu", "메뉴"].includes(command)) {
-    game.hazards = [];
-    game.enemy = null;
-    game.text = null;
-    game.attackMeter = null;
+    clearBattleState();
     openMenu();
     setCommandMessage("메뉴로 돌아갔다.");
     closeCommandConsole();
     return;
   }
 
+  if (["skip", "스킵", "넘기기"].includes(command)) {
+    if (game.state === "title") {
+      openMenu();
+      setCommandMessage("타이틀을 건너뛰고 메뉴로 이동했다.");
+      closeCommandConsole();
+      return;
+    }
+
+    if (game.state === "text") {
+      finishCurrentText();
+      setCommandMessage("대사를 건너뛰었다.");
+      closeCommandConsole();
+      return;
+    }
+
+    if (game.state === "menu") {
+      if (game.roundIndex >= PATTERNS.length) {
+        startAttackMeter();
+        setCommandMessage("마지막 일격 단계로 이동했다.");
+      } else {
+        startEnemyTurn();
+        setCommandMessage(`PHASE ${game.roundIndex + 1} 전투 시작`);
+      }
+      closeCommandConsole();
+      return;
+    }
+
+    if (game.state === "attack") {
+      game.attackMeter = null;
+      if (game.roundIndex >= PATTERNS.length) {
+        openMenu();
+        setCommandMessage("마지막 일격을 취소하고 메뉴로 돌아갔다.");
+      } else {
+        startEnemyTurn();
+        setCommandMessage(`공격 단계를 건너뛰고 PHASE ${game.roundIndex + 1}로 이동했다.`);
+      }
+      closeCommandConsole();
+      return;
+    }
+
+    if (game.state === "enemy") {
+      finishEnemyTurn();
+      setCommandMessage(
+        game.roundIndex >= PATTERNS.length ? "현재 페이즈를 넘겼다." : `PHASE ${game.roundIndex + 1} 준비 완료`,
+      );
+      closeCommandConsole();
+      return;
+    }
+
+    if (["win", "lose"].includes(game.state)) {
+      resetGame();
+      setCommandMessage("결과 화면을 넘기고 초기화했다.");
+      closeCommandConsole();
+      return;
+    }
+
+    setCommandMessage("지금은 건너뛸 수 없다.");
+    closeCommandConsole();
+    return;
+  }
+
   if (["hp", "체력"].includes(command)) {
+    if (!args.length) {
+      setCommandMessage(`현재 HP ${game.player.hp}/${game.player.maxHp}`);
+      closeCommandConsole();
+      return;
+    }
+
     const hp = Number(args[0]);
     if (!Number.isFinite(hp)) {
       setCommandMessage("사용법: hp 40", 3.6);
@@ -1115,11 +1315,28 @@ function executeCommand(rawInput) {
   }
 
   if (["heal", "회복"].includes(command)) {
-    game.player.hp = game.player.maxHp;
+    if (!args.length) {
+      game.player.hp = game.player.maxHp;
+      if (game.state === "lose") {
+        openMenu();
+      }
+      setCommandMessage("HP를 모두 회복했다.");
+      closeCommandConsole();
+      return;
+    }
+
+    const amount = Number(args[0]);
+    if (!Number.isFinite(amount)) {
+      setCommandMessage("사용법: heal | heal 20", 4.2);
+      return;
+    }
+
+    const safeHeal = clamp(Math.round(amount), 1, 999);
+    game.player.hp = Math.min(game.player.maxHp, game.player.hp + safeHeal);
     if (game.state === "lose") {
       openMenu();
     }
-    setCommandMessage("HP를 모두 회복했다.");
+    setCommandMessage(`${safeHeal}만큼 회복했다. HP ${game.player.hp}/${game.player.maxHp}`);
     closeCommandConsole();
     return;
   }
@@ -1148,8 +1365,22 @@ function executeCommand(rawInput) {
 
   if (["soul", "영혼"].includes(command)) {
     const mode = (args[0] || "").toLowerCase();
+
+    if (!mode) {
+      setCommandMessage(`현재 영혼은 ${game.player.soulMode.toUpperCase()}다.`);
+      closeCommandConsole();
+      return;
+    }
+
+    if (["toggle", "전환"].includes(mode)) {
+      resetPlayer(game.player.soulMode === "blue" ? "red" : "blue");
+      setCommandMessage(`영혼 모드를 ${game.player.soulMode.toUpperCase()}로 변경했다.`);
+      closeCommandConsole();
+      return;
+    }
+
     if (!["red", "blue", "빨강", "파랑"].includes(mode)) {
-      setCommandMessage("사용법: soul red | soul blue", 4.2);
+      setCommandMessage("사용법: soul red | soul blue | soul toggle", 4.8);
       return;
     }
 
@@ -1237,6 +1468,34 @@ function executeCommand(rawInput) {
       return;
     }
 
+    if (["set", "설정"].includes(mode)) {
+      const seconds = Number(args[1]);
+      if (!Number.isFinite(seconds)) {
+        setCommandMessage("사용법: timer set 90", 4.2);
+        return;
+      }
+
+      game.stopwatch.elapsed = Math.max(0, seconds);
+      game.stopwatch.lastStopped = game.stopwatch.elapsed;
+      setCommandMessage(`스톱워치 시간을 ${formatStopwatchTime(game.stopwatch.elapsed)}로 설정했다.`);
+      closeCommandConsole();
+      return;
+    }
+
+    if (["add", "plus", "추가"].includes(mode)) {
+      const seconds = Number(args[1]);
+      if (!Number.isFinite(seconds)) {
+        setCommandMessage("사용법: timer add 15", 4.2);
+        return;
+      }
+
+      game.stopwatch.elapsed = Math.max(0, game.stopwatch.elapsed + seconds);
+      game.stopwatch.lastStopped = game.stopwatch.elapsed;
+      setCommandMessage(`스톱워치 ${seconds >= 0 ? "+" : ""}${seconds}초 -> ${formatStopwatchTime(game.stopwatch.elapsed)}`);
+      closeCommandConsole();
+      return;
+    }
+
     if (["show", "표시"].includes(mode)) {
       game.stopwatch.visible = true;
       setCommandMessage("스톱워치를 표시한다.");
@@ -1270,6 +1529,126 @@ function executeCommand(rawInput) {
       `스톱워치 ${game.stopwatch.running ? "RUN" : "STOP"} ${formatStopwatchTime(game.stopwatch.elapsed)}${game.stopwatch.auto ? " AUTO" : ""}`,
       4.4,
     );
+    closeCommandConsole();
+    return;
+  }
+
+  if (["revive", "retry", "부활"].includes(command)) {
+    reviveToMenu();
+    setCommandMessage("최대 HP로 부활하고 메뉴로 돌아갔다.");
+    closeCommandConsole();
+    return;
+  }
+
+  if (["speed", "속도"].includes(command)) {
+    const mode = (args[0] || "").toLowerCase();
+
+    if (!mode) {
+      setCommandMessage(`속도 RED ${PLAYER_STATS.redSpeed} | BLUE ${PLAYER_STATS.blueSpeed}`, 4.8);
+      closeCommandConsole();
+      return;
+    }
+
+    if (!["red", "blue", "both", "all", "빨강", "파랑", "전체"].includes(mode)) {
+      setCommandMessage("사용법: speed red 240 | speed blue 200 | speed both 220", 5.6);
+      return;
+    }
+
+    const speed = Number(args[1]);
+    if (!Number.isFinite(speed)) {
+      setCommandMessage("사용법: speed red 240 | speed blue 200 | speed both 220", 5.6);
+      return;
+    }
+
+    const safeSpeed = clamp(Math.round(speed), 60, 600);
+    if (["red", "빨강"].includes(mode)) {
+      PLAYER_STATS.redSpeed = safeSpeed;
+      setCommandMessage(`RED 속도를 ${safeSpeed}로 설정했다.`);
+    } else if (["blue", "파랑"].includes(mode)) {
+      PLAYER_STATS.blueSpeed = safeSpeed;
+      setCommandMessage(`BLUE 속도를 ${safeSpeed}로 설정했다.`);
+    } else {
+      PLAYER_STATS.redSpeed = safeSpeed;
+      PLAYER_STATS.blueSpeed = safeSpeed;
+      setCommandMessage(`RED/BLUE 속도를 ${safeSpeed}로 설정했다.`);
+    }
+    closeCommandConsole();
+    return;
+  }
+
+  if (["jump", "점프"].includes(command)) {
+    if (!args.length) {
+      setCommandMessage(`현재 점프 높이 ${Math.abs(Math.round(PLAYER_STATS.jumpVelocity))}`, 4.6);
+      closeCommandConsole();
+      return;
+    }
+
+    const jump = Number(args[0]);
+    if (!Number.isFinite(jump)) {
+      setCommandMessage("사용법: jump 480", 3.8);
+      return;
+    }
+
+    const safeJump = clamp(Math.round(Math.abs(jump)), 180, 900);
+    PLAYER_STATS.jumpVelocity = -safeJump;
+    setCommandMessage(`점프 높이를 ${safeJump}로 설정했다.`);
+    closeCommandConsole();
+    return;
+  }
+
+  if (["gravity", "중력"].includes(command)) {
+    if (!args.length) {
+      setCommandMessage(`현재 중력 ${Math.round(PLAYER_STATS.gravity)}`, 4.2);
+      closeCommandConsole();
+      return;
+    }
+
+    const gravity = Number(args[0]);
+    if (!Number.isFinite(gravity)) {
+      setCommandMessage("사용법: gravity 1400", 4.2);
+      return;
+    }
+
+    PLAYER_STATS.gravity = clamp(Math.round(gravity), 200, 4000);
+    setCommandMessage(`중력을 ${PLAYER_STATS.gravity}로 설정했다.`);
+    closeCommandConsole();
+    return;
+  }
+
+  if (["shake", "흔들림"].includes(command)) {
+    if (!args.length) {
+      setCommandMessage(`현재 흔들림 ${game.shake.toFixed(1)}`, 4.2);
+      closeCommandConsole();
+      return;
+    }
+
+    const amount = Number(args[0]);
+    if (!Number.isFinite(amount)) {
+      setCommandMessage("사용법: shake 12", 3.8);
+      return;
+    }
+
+    game.shake = clamp(amount, 0, 30);
+    setCommandMessage(`화면 흔들림을 ${game.shake.toFixed(1)}로 설정했다.`);
+    closeCommandConsole();
+    return;
+  }
+
+  if (["eye", "flash", "눈"].includes(command)) {
+    if (!args.length) {
+      setCommandMessage(`현재 눈 플래시 ${game.eyeFlash.toFixed(1)}`, 4.4);
+      closeCommandConsole();
+      return;
+    }
+
+    const amount = Number(args[0]);
+    if (!Number.isFinite(amount)) {
+      setCommandMessage("사용법: eye 1.2", 3.8);
+      return;
+    }
+
+    game.eyeFlash = clamp(amount, 0, 3);
+    setCommandMessage(`눈 플래시를 ${game.eyeFlash.toFixed(1)}로 설정했다.`);
     closeCommandConsole();
     return;
   }
@@ -1653,6 +2032,28 @@ function updateEnemyPattern(dt) {
               pattern.extraActive ?? 0.16,
             );
           }
+
+          if (cycleHits(enemy.step, pattern.extra2Modulo, pattern.extra2Count ?? 0, pattern.extra2Shift ?? 0)) {
+            const extraVertical = clamp(
+              vertical + (enemy.step % 2 === 0 ? pattern.extra2Spacing ?? 72 : -(pattern.extra2Spacing ?? 72)),
+              ARENA.x + xMargin,
+              ARENA.x + ARENA.w - xMargin,
+            );
+            const extraHorizontal = clamp(
+              horizontal + (enemy.step % 2 === 0 ? pattern.extra2Spacing ?? 56 : -(pattern.extra2Spacing ?? 56)),
+              ARENA.y + yMargin,
+              ARENA.y + ARENA.h - yMargin,
+            );
+            spawnBeam(
+              pattern.extra2Orientation === "vertical" ? "vertical" : "horizontal",
+              pattern.extra2Orientation === "vertical" ? extraVertical : extraHorizontal,
+              pattern.extra2Thickness ?? 28,
+              pattern.extra2Damage ?? 8,
+              pattern.extra2Charge ?? 0.36,
+              pattern.extra2Active ?? 0.16,
+            );
+          }
+
           enemy.nextSpawn += pattern.interval ?? 1;
           enemy.step += 1;
         }
